@@ -5,6 +5,16 @@ import requests
 from collections import Counter
 from bs4 import BeautifulSoup
 import csv
+import nltk
+from nltk.corpus import stopwords
+from sentence_transformers import SentenceTransformer, util
+
+# Télécharger les stopwords de nltk
+nltk.download('stopwords')
+stop_words = set(stopwords.words('french'))
+
+# Charger un modèle NLP pour la similarité sémantique
+model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 def fetch_html(url):
     try:
@@ -22,6 +32,7 @@ def extract_text_from_html(html_content):
 
 def get_word_frequencies(text):
     words = re.findall(r'\b\w{3,}\b', text.lower())  # Exclut les mots de moins de 3 lettres
+    words = [word for word in words if word not in stop_words]  # Suppression des stopwords
     return Counter(words)
 
 def normalize_frequencies(counter_list):
@@ -29,6 +40,18 @@ def normalize_frequencies(counter_list):
     for counter in counter_list:
         combined.update(counter)
     return combined
+
+def filter_semantic_words(keyword, word_frequencies):
+    keyword_embedding = model.encode(keyword, convert_to_tensor=True)
+    filtered_words = {}
+    
+    for word, freq in word_frequencies.items():
+        word_embedding = model.encode(word, convert_to_tensor=True)
+        similarity = util.pytorch_cos_sim(keyword_embedding, word_embedding).item()
+        if similarity > 0.5:  # Seuil de similarité pour garder un mot
+            filtered_words[word] = freq
+    
+    return Counter(filtered_words)
 
 def evaluate_content(frequencies, reference_frequencies):
     score = 0
@@ -68,7 +91,8 @@ def main():
         freq3 = get_word_frequencies(text3)
         
         # Génération de la liste sémantique complète
-        ref_frequencies = normalize_frequencies([freq1, freq2, freq3])
+        raw_ref_frequencies = normalize_frequencies([freq1, freq2, freq3])
+        ref_frequencies = filter_semantic_words(keyword, raw_ref_frequencies)
         
         # Évaluation des sites
         score1 = evaluate_content(freq1, ref_frequencies)
