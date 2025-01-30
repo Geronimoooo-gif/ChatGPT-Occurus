@@ -200,8 +200,9 @@ pivot_table = filtered_stats.pivot_table(
     aggfunc='mean',
     fill_value=0
 ).round(2)
-                
-                st.dataframe(pivot_table)
+
+# Afficher le tableau optimisé
+st.dataframe(pivot_table)
                 
                 # Export des résultats
                 col1, col2 = st.columns(2)
