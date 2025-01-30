@@ -187,13 +187,20 @@ def main():
                 st.subheader("Analyse détaillée par balise HTML")
                 combined_stats = pd.concat(all_tag_stats)
                 
-                pivot_table = combined_stats.pivot_table(
+                # Filtrer les mots-clés qui apparaissent dans le premier tableau
+                filtered_words = set(df1["Mot"])  # Liste des mots à garder
+
+                filtered_stats = combined_stats[combined_stats["word"].isin(filtered_words)]
+
+                # Créer le tableau croisé dynamique optimisé
+                pivot_table = filtered_stats.pivot_table(
                     values='weighted_frequency',
                     index=['word'],
                     columns=['tag'],
                     aggfunc='mean',
                     fill_value=0
                 ).round(2)
+
                 
                 st.dataframe(pivot_table)
                 
