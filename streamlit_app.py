@@ -32,8 +32,76 @@ class SEOAnalyzer:
         nltk.download('stopwords', quiet=True)
         self.stop_words = set(stopwords.words('french'))
         
-    # [Les autres méthodes restent identiques jusqu'à analyze_url]
+    def extract_text_by_tags(self, html_content):
+        """Extrait le texte en conservant l'information sur les balises"""
+        soup = BeautifulSoup(html_content, "html.parser")
+        tag_content = defaultdict(str)
+        
+        for tag_name in TAG_WEIGHTS.keys():
+            elements = soup.find_all(tag_name)
+            tag_content[tag_name] = ' '.join(elem.get_text(strip=True) for elem in elements)
+            
+        full_text = ' '.join(soup.stripped_strings)
+        return tag_content, full_text
     
+    def get_word_frequencies(self, text):
+        """Calcule la fréquence des mots avec normalisation (pour l'ancien tableau)"""
+        words = re.findall(r'\b\w{3,}\b', text.lower())
+        words = [word for word in words if word not in self.stop_words]
+
+        total_words = len(words) if words else 1
+        word_freq = Counter(words)
+
+        normalized_freq = {word: (count / total_words) * 1000 for word, count in word_freq.items()}
+        return Counter(normalized_freq)
+    
+    def get_word_frequencies_by_tag(self, text_by_tags):
+        """Calcule les fréquences des mots pour chaque type de balise"""
+        frequencies_by_tag = {}
+        
+        for tag, content in text_by_tags.items():
+            words = re.findall(r'\b\w{3,}\b', content.lower())
+            words = [word for word in words if word not in self.stop_words]
+            
+            total_words = len(words) if words else 1
+            frequencies = Counter(words)
+            
+            normalized_freq = {
+                word: (count / total_words) * 1000 * TAG_WEIGHTS[tag]
+                for word, count in frequencies.items()
+            }
+            frequencies_by_tag[tag] = Counter(normalized_freq)
+            
+        return frequencies_by_tag
+
+    def filter_semantic_words(self, word_frequencies):
+        """Filtre les mots selon leur similarité sémantique avec le mot-clé cible"""
+        keyword_embedding = self.model.encode(self.keyword, convert_to_tensor=True)
+        filtered_words = {}
+
+        for word, freq in word_frequencies.items():
+            word_embedding = self.model.encode(word, convert_to_tensor=True)
+            similarity = util.pytorch_cos_sim(keyword_embedding, word_embedding).item()
+            if similarity > 0.5:
+                filtered_words[word] = freq
+
+        return Counter(filtered_words)
+
+    def calculate_recommended_frequencies(self, frequencies_list):
+        """Calcule la fréquence médiane des mots et ajuste pour la longueur d'article cible"""
+        word_occurrences = defaultdict(list)
+
+        for freq_dict in frequencies_list:
+            for word, freq in freq_dict.items():
+                word_occurrences[word].append(freq)
+
+        recommended_frequencies = {
+            word: round(np.median(freq_list) * (ARTICLE_LENGTH / 1000))
+            for word, freq_list in word_occurrences.items()
+        }
+
+        return Counter(recommended_frequencies)
+
     def analyze_url(self, url):
         """Analyse complète d'une URL"""
         try:
