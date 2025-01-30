@@ -78,6 +78,14 @@ def calculate_presence_rate(ref_frequencies, site_frequencies_list):
 
     return presence_count
 
+def evaluate_content(frequencies, reference_frequencies):
+    """ Calcule le score d'un site sur 100 """
+    score = 0
+    for word, ref_count in reference_frequencies.items():
+        if word in frequencies:
+            score += min(frequencies[word], ref_count)
+    return round((score / sum(reference_frequencies.values())) * 100, 2)
+
 def main():
     st.title("Analyse Sémantique SEO - 10 URLs")
 
@@ -106,6 +114,14 @@ def main():
 
         # Calcul du taux de présence des mots
         presence_rates = calculate_presence_rate(ref_frequencies, site_frequencies)
+
+        # Calcul des scores des sites
+        site_scores = [evaluate_content(freq, ref_frequencies) for freq in site_frequencies]
+
+        # Affichage des scores
+        st.subheader("Scores des sites analysés")
+        for i, score in enumerate(site_scores):
+            st.write(f"**Site {i+1} ({urls[i]}) :** {score}/100")
 
         # Construction du dataframe final
         df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot/Expression", "Fréquence"])
