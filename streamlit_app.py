@@ -97,12 +97,14 @@ def main():
     
     keyword = st.text_input("Mot-clé cible :", "")
 
-    st.subheader("Entrez les 10 URLs des sites concurrents")
-    url_list = [st.text_input(f"URL {i+1}") for i in range(10)]
+    st.subheader("Collez les 10 URLs des sites concurrents (une par ligne)")
+    urls_input = st.text_area("Entrez les URLs ici")
 
     if st.button("Analyser"):
-        if not keyword or not all(url_list):
-            st.warning("Veuillez remplir toutes les URLs.")
+        url_list = list(filter(None, map(str.strip, urls_input.split("\n"))))  # Nettoyage des URLs
+
+        if not keyword or len(url_list) < 3:
+            st.warning("Veuillez entrer un mot-clé et au moins 3 URLs.")
             return
 
         # Récupération et extraction de texte
@@ -120,15 +122,15 @@ def main():
         scores = [evaluate_content(freq, ref_frequencies) for freq in frequencies]
 
         # Calcul du taux de présence
-        word_presence = {word: sum(1 for freq in frequencies if word in freq) / 10 * 100 for word in ref_frequencies}
+        word_presence = {word: sum(1 for freq in frequencies if word in freq) / len(url_list) * 100 for word in ref_frequencies}
 
         # Calcul des fréquences conseillées pour l'article de 1500 mots
         recommended_freq = calculate_recommended_frequencies(frequencies)
 
         # Affichage des scores des sites
         st.subheader("Scores des sites analysés")
-        for i, score in enumerate(scores):
-            st.write(f"Score du site {i+1} : {score}/100")
+        for i, (url, score) in enumerate(zip(url_list, scores)):
+            st.write(f"🔗 **{url}** - Score SEO : {score}/100")
 
         # Création du dataframe
         df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot", "Fréquence"])
