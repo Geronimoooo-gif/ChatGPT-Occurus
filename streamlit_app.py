@@ -121,6 +121,9 @@ def main():
         # Évaluation des sites
         scores = [evaluate_content(freq, ref_frequencies) for freq in frequencies]
 
+        # Calcul du taux de présence
+        word_presence = {word: sum(1 for freq in frequencies if word in freq) / len(url_list) * 100 for word in ref_frequencies}
+
         # Calcul des fréquences conseillées pour l'article de 1500 mots
         recommended_freq = calculate_recommended_frequencies(frequencies)
 
@@ -130,8 +133,9 @@ def main():
             st.write(f"🔗 **{url}** - Score SEO : {score}/100")
 
         # Création du dataframe
-        df = pd.DataFrame(list(recommended_freq.items()), columns=["Mot", "Fréquence conseillée"])
-        df = df.sort_values(by="Fréquence conseillée", ascending=False)
+        df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot", "Fréquence"])
+        df["Taux de présence"] = df["Mot"].map(word_presence).fillna(0).astype(int).astype(str) + "%"
+        df["Fréquence conseillée"] = df["Mot"].map(recommended_freq).fillna(0).astype(int)
 
         # Affichage du tableau
         st.subheader("Liste des mots à ajouter à votre article")
