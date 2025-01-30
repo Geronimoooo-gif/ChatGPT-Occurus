@@ -4,7 +4,6 @@ import re
 import requests
 from collections import Counter
 from bs4 import BeautifulSoup
-import csv
 import nltk
 from nltk.corpus import stopwords
 from sentence_transformers import SentenceTransformer, util
@@ -17,6 +16,7 @@ stop_words = set(stopwords.words('french'))
 model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
 def fetch_html(url):
+    """ Récupère le HTML d'une URL """
     try:
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
         response.raise_for_status()
@@ -27,33 +27,48 @@ def fetch_html(url):
         return ""
 
 def extract_text_from_html(html_content):
+    """ Extrait le texte brut d'un contenu HTML """
     soup = BeautifulSoup(html_content, "html.parser")
     return ' '.join(soup.stripped_strings)
 
+def get_ngrams(text, n=2):
+    """ Génère des expressions de n mots (bigrams, trigrams) """
+    words = re.findall(r'\b\w{3,}\b', text.lower())  # Exclut les mots courts
+    words = [word for word in words if word not in stop_words]  # Supprime les stopwords
+    ngrams = [' '.join(words[i:i+n]) for i in range(len(words)-n+1)]
+    return Counter(ngrams)
+
 def get_word_frequencies(text):
-    words = re.findall(r'\b\w{3,}\b', text.lower())  # Exclut les mots de moins de 3 lettres
-    words = [word for word in words if word not in stop_words]  # Suppression des stopwords
-    return Counter(words)
+    """ Calcule la fréquence des mots + bigrams + trigrams """
+    words = re.findall(r'\b\w{3,}\b', text.lower())
+    words = [word for word in words if word not in stop_words]
+    unigram_freq = Counter(words)
+    bigram_freq = get_ngrams(text, 2)
+    trigram_freq = get_ngrams(text, 3)
+    return unigram_freq + bigram_freq + trigram_freq  # Combine tout
 
 def normalize_frequencies(counter_list):
+    """ Normalise les fréquences sur plusieurs sources """
     combined = Counter()
     for counter in counter_list:
         combined.update(counter)
     return combined
 
 def filter_semantic_words(keyword, word_frequencies):
+    """ Filtre les mots selon leur similarité sémantique avec le mot-clé """
     keyword_embedding = model.encode(keyword, convert_to_tensor=True)
     filtered_words = {}
-    
+
     for word, freq in word_frequencies.items():
         word_embedding = model.encode(word, convert_to_tensor=True)
         similarity = util.pytorch_cos_sim(keyword_embedding, word_embedding).item()
-        if similarity > 0.5:  # Seuil de similarité pour garder un mot
+        if similarity > 0.4:  # Seuil élargi pour plus de diversité
             filtered_words[word] = freq
     
     return Counter(filtered_words)
 
 def evaluate_content(frequencies, reference_frequencies):
+    """ Compare le contenu d'un site avec les mots-clés pertinents """
     score = 0
     for word, ref_count in reference_frequencies.items():
         if word in frequencies:
@@ -85,12 +100,12 @@ def main():
         text2 = extract_text_from_html(html2)
         text3 = extract_text_from_html(html3)
         
-        # Fréquences de mots
+        # Fréquences de mots et expressions
         freq1 = get_word_frequencies(text1)
         freq2 = get_word_frequencies(text2)
         freq3 = get_word_frequencies(text3)
         
-        # Génération de la liste sémantique complète
+        # Normalisation et filtrage sémantique
         raw_ref_frequencies = normalize_frequencies([freq1, freq2, freq3])
         ref_frequencies = filter_semantic_words(keyword, raw_ref_frequencies)
         
@@ -100,13 +115,13 @@ def main():
         score3 = evaluate_content(freq3, ref_frequencies)
         
         st.subheader("Résultats de l'analyse")
-        st.write(f"\nScore du site 1 : {score1}/100")
+        st.write(f"Score du site 1 : {score1}/100")
         st.write(f"Score du site 2 : {score2}/100")
         st.write(f"Score du site 3 : {score3}/100")
         
-        # Affichage des mots les plus pertinents
-        st.subheader("Liste des mots à ajouter à votre article")
-        df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot", "Fréquence"])
+        # Affichage des mots et expressions les plus pertinents
+        st.subheader("Liste des mots et expressions à ajouter à votre article")
+        df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot/Expression", "Fréquence"])
         st.dataframe(df)
         
         # Export en CSV
