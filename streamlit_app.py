@@ -67,63 +67,54 @@ def filter_semantic_words(keyword, word_frequencies):
     
     return Counter(filtered_words)
 
-def evaluate_content(frequencies, reference_frequencies):
-    """ Compare le contenu d'un site avec les mots-clés pertinents """
-    score = 0
-    for word, ref_count in reference_frequencies.items():
-        if word in frequencies:
-            score += min(frequencies[word], ref_count)
-    return round((score / sum(reference_frequencies.values())) * 100, 2)
+def calculate_presence_rate(ref_frequencies, site_frequencies_list):
+    """ Calcule le pourcentage de présence d'un mot parmi les sites analysés """
+    presence_count = Counter()
+    total_sites = len(site_frequencies_list)
+
+    for word in ref_frequencies.keys():
+        count = sum(1 for site_freq in site_frequencies_list if word in site_freq)
+        presence_count[word] = round((count / total_sites) * 100, 2)  # En pourcentage
+
+    return presence_count
 
 def main():
-    st.title("Analyse Sémantique pour le SEO")
-    
+    st.title("Analyse Sémantique SEO - 10 URLs")
+
     keyword = st.text_input("Mot-clé cible :", "")
-    
-    st.subheader("Entrez les URLs des 3 premiers sites de la SERP")
-    url1 = st.text_input("URL du site en position 1")
-    url2 = st.text_input("URL du site en position 2")
-    url3 = st.text_input("URL du site en position 3")
-    
+
+    st.subheader("Entrez les URLs des 10 premiers sites de la SERP (une par ligne)")
+    urls = st.text_area("Copiez-collez jusqu'à 10 URLs :", "").strip().split("\n")
+    urls = [url.strip() for url in urls if url.strip()][:10]  # Nettoie et limite à 10
+
     if st.button("Analyser"):
-        if not keyword or not url1 or not url2 or not url3:
-            st.warning("Veuillez remplir tous les champs.")
+        if not keyword or len(urls) == 0:
+            st.warning("Veuillez entrer un mot-clé et au moins une URL.")
             return
-        
-        # Récupération du HTML des URLs
-        html1 = fetch_html(url1)
-        html2 = fetch_html(url2)
-        html3 = fetch_html(url3)
-        
-        # Extraction de texte
-        text1 = extract_text_from_html(html1)
-        text2 = extract_text_from_html(html2)
-        text3 = extract_text_from_html(html3)
-        
-        # Fréquences de mots et expressions
-        freq1 = get_word_frequencies(text1)
-        freq2 = get_word_frequencies(text2)
-        freq3 = get_word_frequencies(text3)
-        
-        # Normalisation et filtrage sémantique
-        raw_ref_frequencies = normalize_frequencies([freq1, freq2, freq3])
+
+        # Récupération des contenus des sites
+        site_texts = [extract_text_from_html(fetch_html(url)) for url in urls]
+
+        # Extraction des mots-clés et expressions
+        site_frequencies = [get_word_frequencies(text) for text in site_texts]
+
+        # Normalisation des fréquences globales
+        raw_ref_frequencies = normalize_frequencies(site_frequencies)
+
+        # Filtrage sémantique
         ref_frequencies = filter_semantic_words(keyword, raw_ref_frequencies)
-        
-        # Évaluation des sites
-        score1 = evaluate_content(freq1, ref_frequencies)
-        score2 = evaluate_content(freq2, ref_frequencies)
-        score3 = evaluate_content(freq3, ref_frequencies)
-        
-        st.subheader("Résultats de l'analyse")
-        st.write(f"Score du site 1 : {score1}/100")
-        st.write(f"Score du site 2 : {score2}/100")
-        st.write(f"Score du site 3 : {score3}/100")
-        
-        # Affichage des mots et expressions les plus pertinents
-        st.subheader("Liste des mots et expressions à ajouter à votre article")
+
+        # Calcul du taux de présence des mots
+        presence_rates = calculate_presence_rate(ref_frequencies, site_frequencies)
+
+        # Construction du dataframe final
         df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot/Expression", "Fréquence"])
+        df["Taux de présence (%)"] = df["Mot/Expression"].map(presence_rates)
+
+        # Résultats
+        st.subheader("Liste des mots et expressions à ajouter à votre article")
         st.dataframe(df)
-        
+
         # Export en CSV
         csv_file = "analyse_semantique.csv"
         df.to_csv(csv_file, index=False)
