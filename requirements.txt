@@ -3,4 +3,4 @@ pandas
 requests
 beautifulsoup4
 nltk
-sentence_transformers
+sentence-transformers
