@@ -2,150 +2,162 @@ import streamlit as st
 import pandas as pd
 import re
 import requests
-from collections import Counter
+from collections import Counter, defaultdict
 from bs4 import BeautifulSoup
 import nltk
 from nltk.corpus import stopwords
 from sentence_transformers import SentenceTransformer, util
-import numpy as np  # Pour la médiane
+import numpy as np
 
-# Télécharger les stopwords de nltk
-nltk.download('stopwords')
-stop_words = set(stopwords.words('french'))
+# Configuration des poids SEO pour chaque balise HTML
+TAG_WEIGHTS = {
+    'title': 10.0,  # Plus haute importance
+    'h1': 8.0,
+    'h2': 6.0,
+    'h3': 4.0,
+    'h4': 3.0,
+    'strong': 2.0,
+    'a': 2.5,     # Les liens sont importants pour le SEO
+    'p': 1.0,     # Texte normal
+    'div': 0.8    # Contenu générique
+}
 
-# Charger un modèle NLP pour la similarité sémantique
-model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+class SEOAnalyzer:
+    def __init__(self, keyword, urls):
+        self.keyword = keyword
+        self.urls = urls
+        self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+        self.stop_words = set(stopwords.words('french'))
+        
+    def extract_text_by_tags(self, html_content):
+        """Extrait le texte en conservant l'information sur les balises"""
+        soup = BeautifulSoup(html_content, "html.parser")
+        tag_content = defaultdict(str)
+        
+        # Extraction du contenu pour chaque type de balise
+        for tag_name in TAG_WEIGHTS.keys():
+            elements = soup.find_all(tag_name)
+            tag_content[tag_name] = ' '.join(elem.get_text(strip=True) for elem in elements)
+            
+        return tag_content
+    
+    def get_word_frequencies_by_tag(self, text_by_tags):
+        """Calcule les fréquences des mots pour chaque type de balise"""
+        frequencies_by_tag = {}
+        
+        for tag, content in text_by_tags.items():
+            words = re.findall(r'\b\w{3,}\b', content.lower())
+            words = [word for word in words if word not in self.stop_words]
+            
+            total_words = len(words) if words else 1
+            frequencies = Counter(words)
+            
+            # Normalisation par 1000 mots et application du poids de la balise
+            normalized_freq = {
+                word: (count / total_words) * 1000 * TAG_WEIGHTS[tag]
+                for word, count in frequencies.items()
+            }
+            frequencies_by_tag[tag] = Counter(normalized_freq)
+            
+        return frequencies_by_tag
+    
+    def calculate_weighted_score(self, frequencies_by_tag, reference_frequencies):
+        """Calcule un score SEO pondéré basé sur l'emplacement des mots-clés"""
+        total_score = 0
+        max_possible_score = 0
+        
+        for word, ref_count in reference_frequencies.items():
+            word_score = 0
+            for tag, frequencies in frequencies_by_tag.items():
+                if word in frequencies:
+                    word_score += frequencies[word] * TAG_WEIGHTS[tag]
+            
+            # Score maximum possible pour ce mot
+            max_word_score = ref_count * sum(TAG_WEIGHTS.values())
+            
+            total_score += min(word_score, max_word_score)
+            max_possible_score += max_word_score
+            
+        return round((total_score / max_possible_score) * 100, 2) if max_possible_score > 0 else 0
 
-# Longueur de l'article cible fixée à 1500 mots
-ARTICLE_LENGTH = 1500
-
-def fetch_html(url):
-    """Récupère le contenu HTML d'une URL"""
-    try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
-        return str(soup.body)
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erreur lors de la récupération de {url} : {e}")
-        return ""
-
-def extract_text_from_html(html_content):
-    """Extrait le texte brut d'un contenu HTML"""
-    soup = BeautifulSoup(html_content, "html.parser")
-    return ' '.join(soup.stripped_strings)
-
-def get_word_frequencies(text):
-    """Calcule la fréquence des mots avec normalisation"""
-    words = re.findall(r'\b\w{3,}\b', text.lower())
-    words = [word for word in words if word not in stop_words]
-
-    total_words = len(words) if words else 1  # Évite division par 0
-    word_freq = Counter(words)
-
-    # Normalisation par 1000 mots
-    normalized_freq = {word: (count / total_words) * 1000 for word, count in word_freq.items()}
-    return Counter(normalized_freq)
-
-def normalize_frequencies(counter_list):
-    """Combine les fréquences de plusieurs sites"""
-    combined = Counter()
-    for counter in counter_list:
-        combined.update(counter)
-    return combined
-
-def filter_semantic_words(keyword, word_frequencies):
-    """Filtre les mots selon leur similarité sémantique avec le mot-clé cible"""
-    keyword_embedding = model.encode(keyword, convert_to_tensor=True)
-    filtered_words = {}
-
-    for word, freq in word_frequencies.items():
-        word_embedding = model.encode(word, convert_to_tensor=True)
-        similarity = util.pytorch_cos_sim(keyword_embedding, word_embedding).item()
-        if similarity > 0.5:  # Seuil de similarité
-            filtered_words[word] = freq
-
-    return Counter(filtered_words)
-
-def evaluate_content(frequencies, reference_frequencies):
-    """Calcule un score SEO basé sur la présence des mots-clés"""
-    score = 0
-    for word, ref_count in reference_frequencies.items():
-        if word in frequencies:
-            score += min(frequencies[word], ref_count)
-    return round((score / sum(reference_frequencies.values())) * 100, 2)
-
-def calculate_recommended_frequencies(word_frequencies_list):
-    """Calcule la fréquence médiane des mots et ajuste pour 1500 mots"""
-    word_occurrences = {}
-
-    for freq_dict in word_frequencies_list:
-        for word, freq in freq_dict.items():
-            if word not in word_occurrences:
-                word_occurrences[word] = []
-            word_occurrences[word].append(freq)
-
-    recommended_frequencies = {
-        word: round(np.median(freq_list) * (ARTICLE_LENGTH / 1000))
-        for word, freq_list in word_occurrences.items()
-    }
-
-    return Counter(recommended_frequencies)
+    def analyze_url(self, url):
+        """Analyse complète d'une URL"""
+        try:
+            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            response.raise_for_status()
+            
+            text_by_tags = self.extract_text_by_tags(response.text)
+            frequencies_by_tag = self.get_word_frequencies_by_tag(text_by_tags)
+            
+            # Création d'un DataFrame pour les statistiques par balise
+            tag_stats = []
+            for tag, frequencies in frequencies_by_tag.items():
+                for word, freq in frequencies.items():
+                    tag_stats.append({
+                        'url': url,
+                        'tag': tag,
+                        'word': word,
+                        'frequency': freq,
+                        'weighted_frequency': freq * TAG_WEIGHTS[tag]
+                    })
+            
+            return frequencies_by_tag, pd.DataFrame(tag_stats)
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erreur lors de l'analyse de {url}: {e}")
+            return None, None
 
 def main():
-    st.title("Analyse Sémantique pour le SEO")
+    st.title("Analyse Sémantique SEO Avancée")
     
     keyword = st.text_input("Mot-clé cible :", "")
-
-    st.subheader("Collez les 10 URLs des sites concurrents (une par ligne)")
-    urls_input = st.text_area("Entrez les URLs ici")
-
+    urls_input = st.text_area("URLs des sites concurrents (une par ligne)")
+    
     if st.button("Analyser"):
-        url_list = list(filter(None, map(str.strip, urls_input.split("\n"))))  # Nettoyage des URLs
-
-        if not keyword or len(url_list) < 3:
+        urls = list(filter(None, map(str.strip, urls_input.split("\n"))))
+        
+        if not keyword or len(urls) < 3:
             st.warning("Veuillez entrer un mot-clé et au moins 3 URLs.")
             return
-
-        # Récupération et extraction de texte
-        html_contents = [fetch_html(url) for url in url_list]
-        texts = [extract_text_from_html(html) for html in html_contents]
         
-        # Fréquences des mots
-        frequencies = [get_word_frequencies(text) for text in texts]
-
-        # Génération de la liste sémantique
-        raw_ref_frequencies = normalize_frequencies(frequencies)
-        ref_frequencies = filter_semantic_words(keyword, raw_ref_frequencies)
-
-        # Évaluation des sites
-        scores = [evaluate_content(freq, ref_frequencies) for freq in frequencies]
-
-        # Calcul du taux de présence
-        word_presence = {word: sum(1 for freq in frequencies if word in freq) / len(url_list) * 100 for word in ref_frequencies}
-
-        # Calcul des fréquences conseillées pour l'article de 1500 mots
-        recommended_freq = calculate_recommended_frequencies(frequencies)
-
-        # Affichage des scores des sites
-        st.subheader("Scores des sites analysés")
-        for i, (url, score) in enumerate(zip(url_list, scores)):
-            st.write(f"🔗 **{url}** - Score SEO : {score}/100")
-
-        # Création du dataframe
-        df = pd.DataFrame(ref_frequencies.most_common(30), columns=["Mot", "Fréquence"])
-        df["Taux de présence"] = df["Mot"].map(word_presence).fillna(0).astype(int).astype(str) + "%"
-        df["Fréquence conseillée"] = df["Mot"].map(recommended_freq).fillna(0).astype(int)
-
-        # Affichage du tableau
-        st.subheader("Liste des mots à ajouter à votre article")
-        st.dataframe(df)
-
-        # Export CSV
-        csv_file = "analyse_semantique.csv"
-        df.to_csv(csv_file, index=False)
-        with open(csv_file, "rb") as f:
-            st.download_button("Télécharger le fichier CSV", f, file_name="analyse_semantique.csv", mime="text/csv")
+        analyzer = SEOAnalyzer(keyword, urls)
+        
+        # Analyse de chaque URL
+        all_frequencies = []
+        all_tag_stats = []
+        
+        for url in urls:
+            frequencies_by_tag, tag_stats = analyzer.analyze_url(url)
+            if frequencies_by_tag and tag_stats is not None:
+                all_frequencies.append(frequencies_by_tag)
+                all_tag_stats.append(tag_stats)
+        
+        if all_tag_stats:
+            # Combine tous les résultats
+            combined_stats = pd.concat(all_tag_stats)
+            
+            # Création du tableau de bord des statistiques
+            st.subheader("Analyse détaillée par balise HTML")
+            
+            # Tableau pivotant pour voir les statistiques par mot et par balise
+            pivot_table = combined_stats.pivot_table(
+                values='weighted_frequency',
+                index=['word'],
+                columns=['tag'],
+                aggfunc='mean',
+                fill_value=0
+            ).round(2)
+            
+            st.dataframe(pivot_table)
+            
+            # Export des résultats
+            csv_buffer = pivot_table.to_csv().encode()
+            st.download_button(
+                label="Télécharger l'analyse détaillée (CSV)",
+                data=csv_buffer,
+                file_name="analyse_seo_detaillee.csv",
+                mime="text/csv"
+            )
 
 if __name__ == "__main__":
     main()
