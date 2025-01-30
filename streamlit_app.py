@@ -39,13 +39,19 @@ def get_ngrams(text, n=2):
     return Counter(ngrams)
 
 def get_word_frequencies(text):
-    """ Calcule la fréquence des mots + bigrams + trigrams """
+    """ Calcule la fréquence des mots + bigrams + trigrams avec normalisation """
     words = re.findall(r'\b\w{3,}\b', text.lower())
     words = [word for word in words if word not in stop_words]
+    
+    total_words = len(words) if words else 1  # Évite la division par 0
     unigram_freq = Counter(words)
     bigram_freq = get_ngrams(text, 2)
     trigram_freq = get_ngrams(text, 3)
-    return unigram_freq + bigram_freq + trigram_freq  # Combine tout
+
+    # Fréquence normalisée (par 1000 mots)
+    normalized_freq = {word: (count / total_words) * 1000 for word, count in (unigram_freq + bigram_freq + trigram_freq).items()}
+    
+    return Counter(normalized_freq)
 
 def normalize_frequencies(counter_list):
     """ Normalise les fréquences sur plusieurs sources """
